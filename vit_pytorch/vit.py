@@ -110,6 +110,7 @@ class ViT(nn.Module):
             nn.LayerNorm(dim),
             nn.Linear(dim, num_classes)
         )
+        
 
     def forward(self, img):
         x = self.to_patch_embedding(img)

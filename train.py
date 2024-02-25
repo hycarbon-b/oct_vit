@@ -34,7 +34,8 @@ device = torch.device("cuda:2")
 wandb.init(project="my-project")
 parser = argparse.ArgumentParser(description='Pytorch COVID-ViT 2D/3D Training')
 #parser.add_argument('--save', default='/code/covid_ckpts/oct4class_pretrained/', type=str, help='model save path')
-parser.add_argument('--save', default='/code/covid_ckpts/oct4class_biglr/', type=str, help='model save path')
+# parser.add_argument('--save', default='/code/covid_ckpts/oct4class_biglr/', type=str, help='model save path')
+parser.add_argument('--save', default='/code/covid_ckpts/octa_test/', type=str, help='model save path')
 parser.add_argument('--best', default=0, help='best accuracy')
 args = parser.parse_args()
 if not os.path.exists(args.save):
@@ -44,12 +45,15 @@ if not os.path.exists(args.save):
 def init_weights(m):
     if type(m) == nn.Linear:
         torch.nn.init.uniform_(m.weight)
-
+def mixLoss(output, label):
+    logits = output[:, 0:15]
+    return 7*criterion(output, label) + 3*nn.MSELoss()(torch.argmax(output, dim=1).to(torch.float32), label)
 def train_epoch(epochs, train_loader, model, criterion, optimizer, scheduler, eval_loader=None):
     for epoch in range(epochs):
         epoch_loss = 0
         epoch_accuracy = 0
         batch_cnt = 0
+        model.to(device)
         for data, label in tqdm(train_loader):
             data = data.to(torch.float32)
             label = label
@@ -97,7 +101,7 @@ def eval(eval_loader, model, criterion):
             output = model(data)
             loss = criterion(output, label)
             epoch_loss += loss / len(eval_loader)
-            # print(f"Label: {label.tolist()}")
+            print(f"Result: {(torch.argmax(output, dim=1) == torch.argmax(label, dim=1)).tolist()} , Label: {torch.argmax(label, dim=1).tolist()}")
             # outputs = [torch.argmax(output[i]).item() for i in range(eval_loader.batch_size)]
             # print(f"Output: {outputs}")
             val_acc += (torch.argmax(output, dim=1) == torch.argmax(label, dim=1)).sum()/len(label)
@@ -153,7 +157,7 @@ def get_dataOCT(path):
     labels = [pair[(i.split('/')[-2])] for i in datalistOCT]
     return datalistOCT, labels
 
-get_dataOCT('/code/oct_kaggle/OCT2017/train/')
+
 def balance(train_list, label_list):
     ''' 用于类别平衡 '''
     # 去重
@@ -190,15 +194,22 @@ class CovidDataset(Dataset):
         # z = np.random.randint(0,img_3d_os.shape[2]-1)
         # select 4 2D slice
         z_max = img_3d_os.shape[2]-1
-        z = [5,int(z_max/4), int(z_max/2), z_max-5]
-
-        imgs = [np.expand_dims(np.concatenate((img_3d_os[:, :, i],img_3d_od[:, :, i]),axis=0), axis=2) for i in z]
-        imgs = np.concatenate(imgs, axis=2)
+        
+        # os od水平拼接，然后在垂直上选取切片构成通道
+        # z = [5,int(z_max/4), int(z_max/2), z_max-5]
+        # imgs = [np.expand_dims(np.concatenate((img_3d_os[:, :, i],img_3d_od[:, :, i]),axis=0), axis=2) for i in z]
+        # imgs = np.concatenate(imgs, axis=2)
+        imgs = np.concatenate((img_3d_os[:, :, 20, None],img_3d_od[:, :, 20, None],img_3d_os[:, :, 10, None]), axis=2)
 
         #print('2d-img-shape:',imgs.shape)
         img_transformed = self.transform(imgs)
         #print('2d-img-shape=',img_transformed.size(),type(img_transformed))
-        return img_transformed.to(device), torch.from_numpy(np.expand_dims(self.labels[idx]-85, axis=0)).to(device)[0]
+
+        # class to one-hot
+        label = torch.zeros(15)
+        label[self.labels[idx]-85] = 1
+        # return img_transformed.to(device), torch.from_numpy(np.expand_dims(self.labels[idx]-85, axis=0)).to(device)[0]
+        return img_transformed.to(device), label.to(device)
     
 class oct_kaggleDataset(Dataset):
     def __init__(self, file_list, labels, transform=None):
@@ -231,10 +242,10 @@ def timing(s):
 transform = transforms.Compose(
     [
         transforms.ToTensor(),
-        transforms.Resize((224, 224)),
+        transforms.Resize((260, 260)),
         #transforms.RandomHorizontalFlip(),  # Randomly flip the image horizontally
         #transforms.RandomVerticalFlip(),  # Randomly flip the image vertically
-        # transforms.RandomCrop((448, 448)),  # Randomly crop the image to size (224, 224)
+        transforms.RandomCrop((224, 224)),  # Randomly crop the image to size (224, 224)
     ]
 )
 
@@ -261,18 +272,20 @@ train_list, test_list, train_label, test_label = train_test_split(train_list, la
                                                                  test_size=0.15, 
                                                                  random_state=33)
 # octa dataset
-# train_data = CovidDataset(train_list, train_label, transform=transform)
-# valid_data = CovidDataset(test_list,test_label, transform=transform)
-# test_data = CovidDataset(test_list, label_list,transform=transform)
+train_data = CovidDataset(train_list, train_label, transform=transform)
+valid_data = CovidDataset(test_list,test_label, transform=transform)
+test_data = CovidDataset(test_list, label_list,transform=transform)
 
 # oct_kaggledataset
-train_list, label_list = get_dataOCT('/code/oct_kaggle/OCT2017/train/')
-train_list, test_list, train_label, test_label = train_test_split(train_list, label_list, 
-                                                                 test_size=0.15, 
-                                                                 random_state=33)
-train_data = oct_kaggleDataset(train_list, train_label, transform=transform)
-valid_data = oct_kaggleDataset(test_list,test_label, transform=transform)
-test_data = oct_kaggleDataset(test_list, label_list,transform=transform)
+# train_list, label_list = get_dataOCT('/code/oct_kaggle/OCT2017/train/')
+# train_list, test_list, train_label, test_label = train_test_split(train_list, label_list, 
+#                                                                  test_size=0.15, 
+#                                                                  random_state=33)
+# train_data = oct_kaggleDataset(train_list, train_label, transform=transform)
+# valid_data = oct_kaggleDataset(test_list,test_label, transform=transform)
+# test_data = oct_kaggleDataset(test_list, label_list,transform=transform)
+
+# dataloader
 batch_size = 320
 train_loader = DataLoader(dataset = train_data, batch_size=batch_size, shuffle=True)
 valid_loader = DataLoader(dataset = valid_data, batch_size=batch_size, shuffle=True)
@@ -314,16 +327,17 @@ model = ViT(
 # wts = torch.load('/code/chen/pretrain/net.pt')
 # model.load_state_dict(wts, strict=False)
 model.mlp_head = nn.Linear(1024,4)
-model.to(device)
 
 
 
 
-# Resume from last run
+# initialize the weight 
 # model.apply(init_weights)
-pretrained_net = torch.load('xg_vit_model_covid_2d.pt')
+# Resume from last run
+# pretrained_net = torch.load('xg_vit_model_covid_2d.pt')
+pretrained_net = torch.load('/code/covid_ckpts/oct4class_biglr/val_acc0.9759836196899414.pt')
 model.load_state_dict(pretrained_net)
-
+model.mlp_head = nn.Linear(1024,15)
 
 # loss function
 criterion = nn.MSELoss()

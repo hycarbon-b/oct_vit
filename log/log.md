@@ -64,5 +64,24 @@ oct4class_vgg_1 log
 ![Alt text](image-13.png)
 基本收敛了，save 在oct4_class_biglr, val_acc=0.96  
 - 尝试用上面这个来训练一下octa data  
-    - 把三通道os、od、os
-    - transform修改一下
+    - 把三通道改成os、od、os
+    - transform修改一下(260 crop to 224)
+    - 固定切片选取高度（20），之后修改成随机也跑一下
+好像有点苗头，增加一个神经元用来回归输出，然后0.5*bce + 0.5*mse
+![Alt text](image-14.png)
+- 非常有效， xg pretrain, lr=1e-4 ,bs=256, check有污染
+![Alt text](image-15.png)
+
+
+
+# 5 2024.2.23  
+- 把sat_avg改成四分类  
+- 然后新的dataset
+- TODO: dataset改成4分类后，label变成了 [onehot，reg——value]， 下次纯reg也要更改末尾来匹配新的代码
+
+
+# 6 2024.2.25
+- 修改cosine annelaing，每个epoch进行衰减
+- epoch many调整一下数量， val的bal关掉
+- 先测试no balce
+- 保存每个split保存3个
