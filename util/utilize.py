@@ -41,6 +41,8 @@ import queue
 device = torch.device("cuda:2")
 best = 0.5
 best_tp = 0.1
+metric_log = []
+train_threshold = 0
 def metric(y_true, y_pred):
     # 通过confusing matrix计算sensitivity、specificity
     # 计算混淆矩阵
@@ -152,6 +154,7 @@ def get_dataOCTA_many(path='/code/images-with-labels/'):
         od_list = [i for i in os.listdir(i) if i.split('_')[-2] == 'OD']
         train_list.append([os.path.join(i,sorted(os_list, key=timing)[-1]), os.path.join(i,sorted(od_list, key=timing)[-1])])
     ex = pd.read_excel('/code/Sleep-results.xlsx')
+
     # load label from train_list and excel
     train_label = [(ex[ex.iloc[:,0] == i[0].split('/')[-2]])['sat_avg'].iloc[0] for i in train_list[:]]
     train_list, train_label = many(train_list, train_label)
@@ -289,7 +292,7 @@ def classbalance(train_list, labels):
             new_label.append(tmp_lable[idx])
     return new_train, new_label
 
-def many(train_list, label_list, num=100):
+def many(train_list, label_list, num=150):
     ''' 和balance一样， 强行扩充数据集到指定数目 '''
     # 去重
     all = list(set(label_list))
@@ -306,7 +309,7 @@ def many(train_list, label_list, num=100):
             new_label.append(i)
     return new_train, new_label
 
-def get_dataUNI(path='/code/images-with-labels/', split_idx = 1):
+def get_dataUNI(path='/code/images-with-labels/', split_idx = 1, aug_class= False, infer_3d = False, randz = False, fixz=15, bal_val=False):
     '''
     get all Dataset needed
     这是组内统一 3-fold 的train-test split
@@ -336,8 +339,9 @@ def get_dataUNI(path='/code/images-with-labels/', split_idx = 1):
     ex = pd.read_excel('/code/Sleep-results.xlsx')
     # load label from train_list and excel
     train_label = [(ex[ex.iloc[:,0] == i[0].split('/')[-2]])['sat_avg'].iloc[0] for i in train_list[:]]
-    train_list, train_label = classbalance(train_list, train_label)
     train_list, train_label = many(train_list, train_label)
+    if aug_class:
+        train_list, train_label = classbalance(train_list, train_label)
 
     # for test
     test_list = []
@@ -347,7 +351,8 @@ def get_dataUNI(path='/code/images-with-labels/', split_idx = 1):
         test_list.append([os.path.join(i,sorted(os_list, key=timing)[-1]), os.path.join(i,sorted(od_list, key=timing)[-1])])
     ex = pd.read_excel('/code/Sleep-results.xlsx')
     test_label = [(ex[ex.iloc[:,0] == i[0].split('/')[-2]])['sat_avg'].iloc[0] for i in test_list[:]]
-    # test_list, test_label = balance(test_list, test_label)
+    if bal_val:
+        test_list, test_label = classbalance(test_list, test_label)
     # 修改label_list 为 [类别，gt] 4class：88 92 95 100 右闭区间
     for i in range(len(train_label)):
         if train_label[i] < 89:
@@ -367,10 +372,13 @@ def get_dataUNI(path='/code/images-with-labels/', split_idx = 1):
             test_label[i] = [2, test_label[i]]
         else:
             test_label[i] = [3, test_label[i]]
-
+    
     # octa dataset 4 class
-    train_data = octa4Dataset(train_list, train_label)
-    valid_data = octa4Dataset(test_list, test_label)
+    train_data = octa4Dataset(train_list, train_label, randz=randz)
+    if infer_3d:
+        valid_data = octa4Dataset3d(test_list,test_label, full=True)
+    else:
+        valid_data = octa4Dataset(test_list, test_label, randz=randz)
     return [train_data, valid_data, train_list, test_list, train_label, test_label]
 
     
@@ -460,7 +468,7 @@ class CovidDataset(Dataset):
         self.file_list = file_list
         self.transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Resize((260, 260)),
+            transforms.Resize((280, 280)),
             transforms.RandomRotation(6),
             #transforms.RandomHorizontalFlip(),  # Randomly flip the image horizontally
             transforms.RandomCrop((224, 224)),  # Randomly crop the image to size (224, 224)
@@ -497,18 +505,21 @@ class CovidDataset(Dataset):
         label[self.labels[idx]-85] = 1
         # return img_transformed.to(device), torch.from_numpy(np.expand_dims(self.labels[idx]-85, axis=0)).to(device)[0]
         return img_transformed.to(device), label.to(device)
+    
 class octa4Dataset(Dataset):
-    def __init__(self, file_list, labels, transform=None):
+    def __init__(self, file_list, labels, transform=None, randz = False, fixz = 15):
         self.file_list = file_list
         self.transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Resize((260, 260)),
+            transforms.Resize((300, 300)),
             transforms.RandomRotation(30),
             #transforms.RandomHorizontalFlip(),  # Randomly flip the image horizontally
             transforms.RandomCrop((224, 224)),  # Randomly crop the image to size (224, 224)
             #transforms.Resize((224, 224))
         ])
         self.labels = labels
+        self.randz = randz
+        self.fixz = fixz
 
     def __len__(self):
         self.filelength = len(self.file_list)
@@ -520,7 +531,7 @@ class octa4Dataset(Dataset):
         img_3d_os = np.load(self.file_list[idx][0].replace('.nii.gz','.npy').replace('/code/images-with-labels/', '/code/images_npy/'), mmap_mode='r')
         img_3d_od = np.load(self.file_list[idx][0].replace('.nii.gz','.npy').replace('/code/images-with-labels/', '/code/images_npy/'), mmap_mode='r')
         # randomly select a 2D slice
-        z = np.random.randint(0,img_3d_os.shape[2]-10)
+        z = np.random.randint(5,img_3d_os.shape[2]-6)
         # select 4 2D slice
         z_max = img_3d_os.shape[2]-1
         
@@ -528,7 +539,12 @@ class octa4Dataset(Dataset):
         # z = [5,int(z_max/4), int(z_max/2), z_max-5]
         # imgs = [np.expand_dims(np.concatenate((img_3d_os[:, :, i],img_3d_od[:, :, i]),axis=0), axis=2) for i in z]
         # imgs = np.concatenate(imgs, axis=2)
-        imgs = np.concatenate((img_3d_os[:, :, 15, None],img_3d_od[:, :, 15, None],img_3d_os[:, :, 20, None]), axis=2)
+        
+        # 是否随机
+        if self.randz:
+            imgs = np.concatenate((img_3d_os[:, :, z, None],img_3d_od[:, :, z, None],img_3d_os[:, :, 20, None]), axis=2)
+        else:
+            imgs = np.concatenate((img_3d_os[:, :, self.fixz, None],img_3d_od[:, :, self.fixz, None],img_3d_os[:, :, z, None]), axis=2)
 
         #print('2d-img-shape:',imgs.shape)
         img_transformed = self.transform(imgs)
@@ -541,7 +557,7 @@ class octa4Dataset(Dataset):
         # return img_transformed.to(device), torch.from_numpy(np.expand_dims(self.labels[idx]-85, axis=0)).to(device)[0]
         return img_transformed.to(device), label.to(device)
 class octa4Dataset3d(Dataset):
-    def __init__(self, file_list, labels, transform=None):
+    def __init__(self, file_list, labels, transform=None, full = True):
         self.file_list = file_list
         self.transform = transforms.Compose([
             transforms.ToTensor(),
@@ -549,9 +565,10 @@ class octa4Dataset3d(Dataset):
             #transforms.RandomRotation(20),
             #transforms.RandomHorizontalFlip(),  # Randomly flip the image horizontally
             #transforms.RandomCrop((224, 224)),  # Randomly crop the image to size (224, 224)
-            #transforms.Resize((224, 224))
+            #transforms.Resize((224, 224)),
         ])
         self.labels = labels
+        self.full  = full
 
     def __len__(self):
         self.filelength = len(self.file_list)
@@ -563,12 +580,21 @@ class octa4Dataset3d(Dataset):
         img_3d_os = np.load(self.file_list[idx][0].replace('.nii.gz','.npy').replace('/code/images-with-labels/', '/code/images_npy/'), mmap_mode='r')
         img_3d_od = np.load(self.file_list[idx][0].replace('.nii.gz','.npy').replace('/code/images-with-labels/', '/code/images_npy/'), mmap_mode='r')
         
-        # 水平拼接，然后在垂直上选取切片构成通道
+        
         z_max = img_3d_os.shape[2]-17
-        z = np.random.randint(0,z_max)
-        z = range(z,z+16)
-        imgs_os, imgs_od = [img_3d_os[:, :, i, None] for i in z],[img_3d_od[:, :, i, None] for i in z]
-        imgs = [np.concatenate((imgs_os[i],imgs_od[i]), axis=1) for i in range(16)]
+        
+        if self.full:
+            #os od 垂直
+            z = range(5,200)
+            imgs_os, imgs_od = [img_3d_os[:, :, i, None] for i in z],[img_3d_od[:, :, i, None] for i in range(len(z))]
+            imgs = [np.concatenate((imgs_os[i],imgs_od[i],imgs_os[20]), axis=2) for i in range(len(z))]
+        else:
+            #os od 水平拼接
+            z = np.random.randint(0,z_max)
+            imgs_os, imgs_od = [img_3d_os[:, :, i, None] for i in z],[img_3d_od[:, :, i, None] for i in range(z,z+16)]
+            imgs = [np.concatenate((imgs_os[i],imgs_od[i]), axis=1) for i in range(16)]
+            
+
         imgs = [self.transform(i) for i in imgs]
         imgs = torch.stack(imgs, dim = -1)
 
@@ -606,7 +632,21 @@ class oct_kaggleDataset(Dataset):
         img_transformed = torch.cat([img_transformed, img_transformed, img_transformed], dim=0)
         return img_transformed.to(device), label.to(device)
     
-
+def get_vani(outsize = 5, dropout=0.25):
+    model = ViT(
+        dim=1024,
+        image_size=224,
+        patch_size=32,
+        num_classes=2,
+        depth=12,
+        heads=8,
+        mlp_dim=1024,
+        # transformer=efficient_transformer,
+        channels=3,
+        emb_dropout=dropout,
+    ).to(device)
+    model.mlp_head = nn.Linear(1024,outsize)
+    return model
     
 def get_model_oct_withpretrain(pretrain_out = 2,outsize=15, path='/code/chen/pretrain/net.pt', dropout=0.25):
     '''
@@ -718,12 +758,27 @@ def get_model_conv(pretrain_out=2,outsize=16, path='/code/chen/pretrain/net.pt',
     model.load_state_dict(wts, strict=False)
     model.mlp_head = conv_head(1024,outsize)
     return model
+def load_config(train_epoch):
+    def wrapper(*args, **kwargs):
+        kwargs['criterion'] = mixloss(bce_weight=kwargs['bce_weight'])
+        kwargs['optimizer'] = kwargs['optimizer'](kwargs['model'].parameters(), lr=kwargs['lr'], weight_decay=kwargs['decay'])
+        kwargs['scheduler'] = kwargs['scheduler'](kwargs['optimizer'], T_max= kwargs['epochs'], eta_min=2e-6)
+        kwargs['train_loader'], kwargs['eval_loader'] = DataLoader(kwargs['datasets'][0], kwargs['batch_size'], kwargs['shuffle']), DataLoader(kwargs['datasets'][1], kwargs['batch_size'], kwargs['shuffle'])
+        return train_epoch(*args, **kwargs)
+    return wrapper
 
+@load_config
 def train_epoch(epochs, train_loader, model, criterion, optimizer, scheduler, eval_loader=None, save_path='temp/', **kwargs):
     # 打印dataset的长度
     print(f"Train dataset length: {len(train_loader.dataset)}, Val dataset length: {len(eval_loader.dataset)}")
-    wandb.init(entity=kwargs['wandb'][0], project=kwargs['wandb'][1], name='vit-lr4e-4-bce')
-    # wandb.init(project="temp")
+    wandb.init(entity= kwargs['wandb'][0], project=kwargs['wandb'][1], name= kwargs['wandb'][2])
+    wandb.config = {'lr': kwargs['lr'], 'batch_size': kwargs['batch_size'], 'mixloss': kwargs['bce_weight']}
+    train_acc = 0
+    global metric_log,best,best_tp, train_threshold
+    metric_log = []
+    train_threshold = 0.6
+    best = 0   # val_acc logging threshold
+    best_tp = 0  # ture_positive threshold
     if not os.path.exists(save_path):
         os.makedirs(save_path)
     savings = queue.Queue()
@@ -740,7 +795,7 @@ def train_epoch(epochs, train_loader, model, criterion, optimizer, scheduler, ev
             output = model(data)
             # 每个batch进行一次pos_weight的balance
             pos_weight = get_pos_weight(label, 4)
-            pos_weight = torch.ones(4).to(device)
+            # pos_weight = torch.ones(4).to(device)
             loss = criterion(output, label, pos_weight=pos_weight)
             if kwargs['is_MIX']: 
                 output = output[:, :4]
@@ -750,46 +805,64 @@ def train_epoch(epochs, train_loader, model, criterion, optimizer, scheduler, ev
             optimizer.step()
             output, label = torch.argmax(output, dim=1) , torch.argmax(label, dim=1)
             metrics = metric(output.tolist(), label.tolist())
+            train_acc = (output == label).sum()/len(label)
             wandb.log({'epoch': epoch, 
                        'train_loss': loss, 
                        'lr': optimizer.param_groups[0]['lr'],
                        #'train_mse': nn.MSELoss()(torch.argmax(output, dim=1).to(torch.float32), label),
-                       'train_acc': (output == label).sum()/len(label),
+                       'train_acc': train_acc,
                        })
             epoch_loss += loss / len(train_loader)
             # validating between every n batch
-            if(batch_cnt% 6 == 0):
-                eval(eval_loader, model, criterion, save_path=save_path, is_MIX=kwargs['is_MIX'], savings=savings)
+            # if(batch_cnt% 20 == 0):
+            #     eval(eval_loader, model, criterion, save_path=save_path, is_MIX=kwargs['is_MIX'], savings=savings, train_acc=train_acc, vote_loader = kwargs['vote_loader'])
             # TODO save the checkpoint every batch 
             torch.save(model.state_dict(), save_path + 'xg_vit_model_covid_2d.pt')
             batch_cnt += 1
         scheduler.step()
-        eval(eval_loader, model, criterion, save_path=save_path, is_MIX=kwargs['is_MIX'], savings=savings)
+        if(epoch%8 == 0):
+            eval(eval_loader, model, criterion, save_path=save_path, is_MIX=kwargs['is_MIX'], savings=savings, train_acc=train_acc, vote_loader = kwargs['vote_loader'])
+    # 多个run保存metric到一个统一的文件
+    try:
+        with open(kwargs['metric_path'], 'a') as f:
+            df = pd.read_csv(kwargs['metric_path']) # 报错的话在可以csv里随便打一个字符
+            for i in metric_log:
+                i['run'] = kwargs['wandb'][2] +' ' + kwargs['wandb'][1]  # 每一行加run name
+            df2 = pd.DataFrame(metric_log)
+            df = df.append(df2, ignore_index=True)
+            df = df.append({'val_acc': df2['val_acc'].mean(), 'sensitivity': df2['sensitivity'].mean(), 'specificity': df2['specificity'].mean(),
+                        'std1': df2['val_acc'].std(), 'std2': df2['sensitivity'].std(), 'std3': df2['specificity'].std()}, ignore_index=True)
+            df.to_csv(kwargs['metric_path'], index=False)
+    except:
+        pass
+
     wandb.finish()
 
-def eval(eval_loader, model, criterion, save_path, is_MIX, **kwargs):
+def eval(eval_loader, model, criterion, save_path, is_MIX,train_acc, **kwargs):
     global best
     model.to(device)
     with torch.no_grad():
         epoch_loss = 0
         sum_acc = 0
         avg_sensitivity, avg_specificity = 0, 0
+        # 2d infer
         for data, label in eval_loader:
             data = data.to(device).to(torch.float32)
             label = label.to(device)
             output = model(data)
             loss = criterion(output, label)
-            with open(os.path.join(save_path, 'out.txt'), 'a') as f:
-                print(f'Output: {output[:,4].tolist()} , Label: {label[:,4].tolist()} \n', file=f) # 接着写入
             if is_MIX: 
                 reg, reg_label = output[:,4].to(device).to(torch.float32) , label[:,4].to(device).to(torch.float32)
                 output = output[:, :4]
                 label = label[:, :4]
             epoch_loss += loss / len(eval_loader)
             output, label = torch.argmax(output, dim=1) , torch.argmax(label, dim=1)
-            with open(os.path.join(save_path, 'out.txt'), 'a') as f:
-                print(f"Result: {output.tolist()} , Label: {label.tolist()} \n", file=f)
             metrics = metric(output.tolist(), label.tolist())
+            with open(os.path.join(save_path, 'out.txt'), 'a') as f:
+                # log to the save_path
+                print("Evaluating...")
+                print(f"Result: {output.tolist()} , Label: {label.tolist()} \n", file=f)
+                print(f'Confusion: {confusion_matrix(output.tolist(), label.tolist())} \n', file=f)
             sensitivity, specificity = metrics[0].tolist(), metrics[1].tolist()
             avg_sensitivity += sensitivity/len(eval_loader)
             avg_specificity += specificity/len(eval_loader)
@@ -805,22 +878,74 @@ def eval(eval_loader, model, criterion, save_path, is_MIX, **kwargs):
                     })
         except:
             pass
-        if(val_acc > best):
+        # 3d infer
+        global metric_log, train_threshold
+        if train_acc < train_threshold:
+            return val_acc
+        acc_vote, sensitivity_vote, specificity_vote = vote(kwargs['vote_loader'], model, save_path, is_MIX, **kwargs)
+        try:
+            wandb.log({
+                    #'Val_mse': nn.MSELoss()(reg, reg_label), 
+                    'acc_vote': acc_vote,
+                    'sensitivity_vote': sensitivity_vote,
+                    'specificity_vote': specificity_vote,
+                    })
+        except:
+            pass
+        # save results to experiments log(for several exp) 
+        
+        if(val_acc > best and train_acc>train_threshold):
             best = val_acc
             torch.save(model.state_dict(), save_path + f'valacc{val_acc:.4f}_tpr_{metrics[0].tolist():.4f}.pt')
             kwargs['savings'].put(save_path + f'valacc{val_acc:.4f}_tpr_{metrics[0].tolist():.4f}.pt')
+            metric_log.append({'val_acc': val_acc.cpu().numpy(), 'sensitivity': metrics[0].tolist(), 'specificity': metrics[1].tolist()})
             try:
                 os.remove(kwargs['savings'].get()) #不要报错
             except:
                 pass
-        elif(val_acc == best and avg_sensitivity > best_tp):
+        elif(val_acc == best and avg_sensitivity > best_tp and train_acc>train_threshold):
             torch.save(model.state_dict(), save_path + f'valacc{val_acc:.4f}_tpr_{metrics[0].tolist():.4f}.pt')
             kwargs['savings'].put(save_path + f'valacc{val_acc:.4f}_tpr_{metrics[0].tolist():.4f}.pt')
+            metric_log.append({'val_acc':  val_acc.cpu().numpy(), 'sensitivity': metrics[0].tolist(), 'specificity': metrics[1].tolist()})
             try:
                 os.remove(kwargs['savings'].get()) #不要报错
             except:
                 pass
         return val_acc
+    
+def vote(pred_loader, model, save_path, is_MIX, **kwargs):
+    """
+    e.g 
+    a = get_dataUNI(infer_3d=True)
+    datas = DataLoader(a[1], batch_size=1, shuffle=False)
+    vote(datas, is_MIX=True,save_path='/code/covid_ckpts/temp/',model = get_model_octa_resume(outsize=5, path='/code/covid_ckpts/aug_octa_split1/valacc0.7895_tpr_0.8222.pt'))
+
+    """
+    outs, gts = [], []
+    for data, label in pred_loader:
+        # bs 设置成1，跑完所有的图片
+        # 置换通道： 1 c h w z -> z(b) c h w
+        data = data[0].permute(3,0,1,2).to(device).to(torch.float32)
+        model.to(device)
+        output = model(data) # b , [logits, reg]
+        if is_MIX: 
+            reg = output[:,4].to(device).to(torch.float32) 
+            output = output[:, :4]
+        output = torch.argmax(output, dim=1).tolist()
+        outputs = [output.count(i) for i in range(4)]
+        out_class = outputs.index(max(outputs))
+        with open(os.path.join(save_path, 'out.txt'), 'a') as f:
+            print(f'voting, outputs:{outputs} label:{torch.argmax(label[0][:4]).tolist()} \n', file=f) # 接着写入
+        outs.append(out_class)
+        gts.append(torch.argmax(label[0][:4]).tolist()) 
+    metrics = metric(outs, gts)
+    is_right = [outs[i] == gts[i] for i in range(len(gts))]
+    acc = sum(is_right)/len(gts)
+    sensitivity, specificity = metrics[0], metrics[1]
+    return acc, sensitivity, specificity
+    # wandb.log({'vote_acc': acc, 'vote_sensitivity':sensitivity, 'vote_specificity':specificity})
+
+
 def test(eval_loader, model, criterion, save_path,is_MIX, **kwargs):
     model.to(device)
     with torch.no_grad():
@@ -841,8 +966,7 @@ def test(eval_loader, model, criterion, save_path,is_MIX, **kwargs):
         val_acc = sum_acc / len(eval_loader)
         return val_acc
 
-def predict(model):
-    pass
+
 def mixloss(bce_weight=0.5):
     def loss(output, label, pos_weight=torch.tensor([0.25,0.25,0.25,0.25])):
         # 取output的前15()个神经元 output shape(batch, 16)

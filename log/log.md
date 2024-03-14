@@ -85,3 +85,19 @@ oct4class_vgg_1 log
 - epoch many调整一下数量， val的bal关掉
 - 先测试no balce
 - 保存每个split保存3个
+
+
+# 7 2024.2.29 
+- 已经完成基本的ablation（finetune， mixloss， bal-aug bce）
+- 增加实验记录的功能
+- 增加一组baseline（no finetune）
+- 增加一组新的implement， 随机选层数， inference时投票
+    - 为现有的dataset增加一个rand选项
+    - 做一个新dataset+dataloader用于inference whole depth
+    - 
+- 增加3d的preload
+- 怎加软边界loss
+
+# 8 2024.3.10
+- 已经增加了3d infer
+- 跑一下randz-bal-all：试一下全部随机层数训练，类别处处平衡，infer时先many class（之后改成vote）
