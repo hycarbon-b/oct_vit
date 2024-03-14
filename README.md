@@ -2,7 +2,7 @@
 The net is based on project []()  
 ## Environment 
 ```
-
+git clone https://github.com/hycarbon-b/oct_vit.git
 ```
 ## Usage of mixloss
 mixloss() take inputs of class logits +  regression value as input, and implement $BCEwithlogits() + MSELoss()$ as criterion for backpropagation 
@@ -10,7 +10,7 @@ $$mixloss = \alpha * bce + (1-\alpha) * mse $$
 Tips: it supports bal-bce
 usage: 
 ```
-import oct_vit/util/utilize as util
+import oct_vit/util/utilize as util     # ensure the current work folder containning oct_vit
 
 criterion = mixloss(a, pos_weight)     # a is the weight of bce
 # target = [0.9, 0.2, 0.1, 0.2, 98]   4class logits + regression value
