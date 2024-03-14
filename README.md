@@ -6,7 +6,7 @@ The net is based on project []()
 ```
 ## Usage of mixloss
 mixloss() take inputs of class logits +  regression value as input, and implement $BCEwithlogits() + MSELoss()$ as criterion for backpropagation 
-$$mix = \alpha * bce + (1-\alpha) * mse $$
+$$mixloss = \alpha * bce + (1-\alpha) * mse $$
 usage: 
 ```
 import oct_vit/util/utilize as util
