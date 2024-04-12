@@ -6,6 +6,8 @@ check repo of lucidrains/vit-pytorch
 git clone https://github.com/hycarbon-b/oct_vit.git
 ## Train
 ```
+
+```
 1. modify the datasets func to load data 
 2. modify args dict in train.py
  args = {
@@ -35,8 +37,6 @@ git clone https://github.com/hycarbon-b/oct_vit.git
 
 ```
 python train.py
-```
-
 ```
 ## Usage of mixloss
 mixloss() take inputs of class logits +  regression value as input, and implement $BCEwithlogits() + MSELoss()$ as criterion for backpropagation 
