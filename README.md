@@ -4,9 +4,9 @@ The net is based on [lucidrains/vit-pytorch](https://github.com/lucidrains/vit-p
 check repo of lucidrains/vit-pytorch
 ```
 git clone https://github.com/hycarbon-b/oct_vit.git
-## Train
-```
 
+```
+## Train
 ```
 1. modify the datasets func to load data 
 2. modify args dict in train.py
