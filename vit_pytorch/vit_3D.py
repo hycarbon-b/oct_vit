@@ -24,7 +24,6 @@ class PreNorm(nn.Module):
 class FeedForward(nn.Module):
     def __init__(self, dim, hidden_dim, dropout = 0.):
         super().__init__()
-        print('dim,hidden_din=',dim, hidden_dim)
         self.net = nn.Sequential(
             nn.Linear(dim, hidden_dim),
             nn.GELU(),
@@ -68,19 +67,16 @@ class Attention(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout = 0.):
         super().__init__()
-        print('transformer:,input=',dim, depth, heads,dim_head,mlp_dim)
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
                 PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = dropout)),
                 PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout))
             ]))
-        print('2:ViT:dim,mlp_dim=',dim,mlp_dim)
     def forward(self, x):
         for attn, ff in self.layers:
             x = attn(x) + x
             x = ff(x) + x
-        #print('transformer,x=',x)
         return x
 
 class ViT3(nn.Module):
@@ -89,19 +85,14 @@ class ViT3(nn.Module):
         assert image_size % patch_size == 0, 'image dimensions must be divisible by the patch size'
         num_patches = (image_size // patch_size) ** 2 * 2
         patch_dim = channels * patch_size ** 3
-        print('xg:n_patches,p-dim, mlp_dim,depth=',num_patches,patch_dim, mlp_dim, depth)
         self.patch_size = patch_size
 
         self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
         self.patch_to_embedding = nn.Linear(patch_dim, dim)
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(emb_dropout)
-        print('dim, mlp_dim=', dim, mlp_dim)
-        print('self-pos,patch2-embedding,cls_tokem,dropput',self.pos_embedding[0].shape, self.patch_to_embedding,self.cls_token[0].shape,self.dropout)
 
-        print('ViT:dim,mlp_dim=',dim,mlp_dim)
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
-        #print('transfer=', self.transformer)
 
         self.to_cls_token = nn.Identity()
 
