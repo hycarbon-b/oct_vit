@@ -1,9 +1,7 @@
 import glob
 from itertools import chain
 import os
-import argparse
 import random
-import zipfile
 import gc
 import numpy as np
 import pandas as pd
@@ -13,32 +11,20 @@ import torch.nn.functional as F
 import torch.optim as optim
 from PIL import Image
 from sklearn.model_selection import train_test_split
-from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets, transforms
 from tqdm.notebook import tqdm
 from linformer import Linformer
 import torchvision.transforms.functional as TF
-from torch.autograd import Variable
-import torch.nn.functional as F
-import io
-import random
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix
-#from vit_pytorch.efficient import ViT
-#from vit_pytorch.efficient import ViT
-import sys
-sys.path.append('/code/chen/COVID-Net')
 from vit_pytorch.vit import ViT
 from vit_pytorch.deepvit import DeepViT
 from vit_pytorch import ViT3
 
 import wandb
-import os
-import numpy as np
-from sklearn.metrics import confusion_matrix
 import queue
-device = torch.device("cuda:2")
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 best = 0.5
 best_tp = 0.1
 metric_log = []
@@ -978,7 +964,6 @@ def mixloss(bce_weight=0.5):
         return (bce_weight)*nn.BCEWithLogitsLoss(pos_weight=pos_weight.to(device))(logits, logits_label) + (1-bce_weight)*nn.MSELoss()(reg, reg_label)
     return loss
 def get_pos_weight(label, num_classes=4):
-    ''' 用于计算pos_weight '''
     # 计算pos_weight ,label = batch [logits, reg_value]
     label = torch.argmax(label[:, : num_classes], dim=1)
     label = label.tolist()
@@ -987,11 +972,6 @@ def get_pos_weight(label, num_classes=4):
     # 计算每个类别的权重
     weights = torch.tensor([1.0 / count for count in counts])
     return weights
-
-
-device = torch.device("cuda:2")
-best = 0.5
-best_tp = 0.1
 
 
 if __name__ == "__main__":

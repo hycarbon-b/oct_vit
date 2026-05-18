@@ -99,8 +99,6 @@ class ViT(nn.Module):
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(emb_dropout)
 
-        print('sefl=', self.pos_embedding[0].shape, self.cls_token[0].shape,self.dropout)
-
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
 
         self.pool = pool
